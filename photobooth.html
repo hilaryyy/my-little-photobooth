@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>my little photobooth</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Text&family=Hurricane&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'DM Serif Text', serif;
+      background-color: #fefbf8;
+      color: #4b2e2e;
+      text-align: center;
+      padding: 30px;
+    }
+    h1 {
+      font-family: 'Hurricane', cursive;
+      font-size: 40px;
+      margin-bottom: 10px;
+    }
+    .hidden { display: none; }
+    video {
+      transform: scaleX(-1);
+      border-radius: 16px;
+      width: 320px;
+      height: 240px;
+      object-fit: cover;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+      margin-bottom: 10px;
+    }
+    select {
+      padding: 8px;
+      font-size: 14px;
+      margin-top: 10px;
+      border-radius: 6px;
+      border: 1px solid #aaa;
+      font-family: 'DM Serif Text', serif;
+    }
+    button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background-color: #363636;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #countdown {
+      font-size: 60px;
+      font-weight: bold;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #363636;
+      display: none;
+      z-index: 10;
+    }
+    .preview img {
+      width: 240px;
+      height: 180px;
+      object-fit: cover;
+      border: 4px solid #363636;
+      border-radius: 12px;
+      margin-bottom: 10px;
+    }
+    .customize select {
+      margin: 10px;
+    }
+    .customize input[type="checkbox"] { margin-left: 10px; }
+    #final-strip {
+      margin-top: 30px;
+      border-radius: 16px;
+      background: white;
+      width: 270px;
+      padding: 20px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    #final-strip img {
+      width: 230px;
+      height: 170px;
+      object-fit: cover;
+      border-radius: 10px;
+      margin-bottom: 12px;
+    }
+    #final-strip .label {
+      font-size: 18px;
+      font-weight: bold;
+      margin-top: 12px;
+    }
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+  <div id="countdown">3</div>
+
+  <!-- Page 1: Capture -->
+  <div id="page1">
+    <h1>my little photobooth</h1>
+    <video id="video" autoplay></video>
+    <br>
+    <label for="filter">Filter:</label>
+    <select id="filter">
+      <option value="none">none</option>
+      <option value="soft">soft light</option>
+      <option value="grain">ccd</option>
+      <option value="bw">black & white</option>
+    </select>
+    <br>
+    <button id="start-btn">Start</button>
+  </div>
+
+  <!-- Page 2: Customize -->
+  <div id="page2" class="hidden">
+    <h1>customize your strip</h1>
+    <div class="customize">
+      <label>Frame Color:</label>
+      <select id="frame-color">
+        <option value="#fce4ec">soft pink</option>
+        <option value="#ffffff">white</option>
+        <option value="#000000">black</option>
+      </select>
+      <label>Text Color:</label>
+      <select id="text-color">
+        <option value="yellow">yellow</option>
+        <option value="white">white</option>
+        <option value="black">black</option>
+        <option value="pink">pink</option>
+        <option value="blue">blue</option>
+      </select>
+      <label>
+        <input type="checkbox" id="show-date" /> Show Date
+      </label>
+    </div>
+    <div id="final-strip"></div>
+  </div>
+
+  <canvas id="canvas"></canvas>
+  <canvas id="finalCanvas"></canvas>
+
+  <script>
+window.addEventListener("DOMContentLoaded", () => {
+  // Elements
+  const video = document.getElementById("video");
+  const startBtn = document.getElementById("start-btn");
+  const countdown = document.getElementById("countdown");
+  const filterSelect = document.getElementById("filter");
+  const frameColorSelect = document.getElementById("frame-color");
+  const textColorSelect = document.getElementById("text-color");
+  const showDateCheckbox = document.getElementById("show-date");
+  const page1 = document.getElementById("page1");
+  const page2 = document.getElementById("page2");
+  const finalStrip = document.getElementById("final-strip");
+  const canvas = document.getElementById("canvas");
+  const finalCanvas = document.getElementById("finalCanvas");
+  const stripImages = [];
+
+  // Disable Start until video is ready
+  startBtn.disabled = true;
+
+  // Live video
+  navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => {
+      video.srcObject = stream;
+      video.onloadedmetadata = () => {
+        startBtn.disabled = false;
+      };
+    })
+    .catch(() => alert("Camera access denied"));
+
+  // 💡 Live Filter Preview
+  function updateVideoFilter() {
+    const f = filterSelect.value;
+    if (f === "soft") {
+      video.style.filter = "brightness(1.15) saturate(1.2)";
+      removeCCDOverlay();
+    } else if (f === "bw") {
+      video.style.filter = "grayscale(100%)";
+      removeCCDOverlay();
+    } else if (f === "grain") {
+      video.style.filter = "contrast(1.4) brightness(0.8)";
+      addCCDOverlay();
+    } else {
+      video.style.filter = "none";
+      removeCCDOverlay();
+    }
+  }
+
+  filterSelect.addEventListener("change", updateVideoFilter);
+  updateVideoFilter();
+
+  // 🧊 CCD Overlay (subtle grain)
+  function addCCDOverlay() {
+    if (!document.getElementById("ccd-overlay")) {
+      const overlay = document.createElement("div");
+      overlay.id = "ccd-overlay";
+      Object.assign(overlay.style, {
+        position: "absolute",
+        width: video.offsetWidth + "px",
+        height: video.offsetHeight + "px",
+        top: video.offsetTop + "px",
+        left: video.offsetLeft + "px",
+        backgroundImage: "repeating-linear-gradient(0deg, rgba(255,255,255,0.07) 0px, transparent 1px)",
+        opacity: "0.15",
+        pointerEvents: "none",
+        borderRadius: "16px",
+        zIndex: "3"
+      });
+      document.body.appendChild(overlay);
+    }
+  }
+  function removeCCDOverlay() {
+    const overlay = document.getElementById("ccd-overlay");
+    if (overlay) overlay.remove();
+  }
+
+  // 🧨 Countdown + camera flash
+  function showCountdown(count, callback) {
+    countdown.textContent = count;
+    countdown.style.display = "block";
+    let interval = setInterval(() => {
+      count--;
+      if (count > 0) {
+        countdown.textContent = count;
+      } else {
+        clearInterval(interval);
+        flashVideo();
+        countdown.style.display = "none";
+        callback();
+      }
+    }, 1000);
+  }
+
+  function flashVideo() {
+    video.style.transition = "box-shadow 0.2s ease";
+    video.style.boxShadow = "0 0 80px black";
+    setTimeout(() => {
+      video.style.boxShadow = "0 6px 20px rgba(0,0,0,0.1)";
+    }, 200);
+  }
+
+  // 📸 Apply canvas filter
+  function applyFilter(ctx, f, w, h) {
+    if (f === "soft") {
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = "rgba(255,220,220,0.4)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = 1;
+    } else if (f === "grain") {
+      const data = ctx.getImageData(0, 0, w, h);
+      for (let i = 0; i < data.data.length; i += 4) {
+        const noise = (Math.random() - 0.5) * 20;
+        data.data[i] += noise;
+        data.data[i + 1] += noise;
+        data.data[i + 2] += noise;
+      }
+      ctx.putImageData(data, 0, 0);
+    } else if (f === "bw") {
+      const data = ctx.getImageData(0, 0, w, h);
+      for (let i = 0; i < data.data.length; i += 4) {
+        const avg = (data.data[i] + data.data[i + 1] + data.data[i + 2]) / 3;
+        data.data[i] = data.data[i + 1] = data.data[i + 2] = avg;
+      }
+      ctx.putImageData(data, 0, 0);
+    }
+  }
+
+  // 🧃 Take photo
+  function takePhoto(index, callback) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    applyFilter(ctx, filterSelect.value, canvas.width, canvas.height);
+    const img = new Image();
+    img.src = canvas.toDataURL("image/png");
+    stripImages[index] = img;
+    callback();
+  }
+
+  // 🎁 Render final strip and download link
+  function renderFinalStrip() {
+  finalCanvas.width = 280;
+  finalCanvas.height = (180 * 4) + (12 * 3) + 80; // increased bottom padding
+  const ctx = finalCanvas.getContext("2d");
+  ctx.fillText("photobooth", finalCanvas.width / 2, finalCanvas.height - 40);
+  ctx.fillStyle = frameColorSelect.value;
+  ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+
+  for (let i = 0; i < 4; i++) {
+    ctx.drawImage(stripImages[i], 20, i * (180 + 12) + 20, 240, 180);
+  }
+
+  ctx.fillStyle = textColorSelect.value;
+  ctx.font = "bold 18px 'DM Serif Text', serif";
+  ctx.textAlign = "center";
+  ctx.fillText("photobooth", finalCanvas.width / 2, finalCanvas.height - 30);
+
+  if (showDateCheckbox.checked) {
+    ctx.font = "14px 'DM Serif Text', serif";
+    const today = new Date().toLocaleDateString();
+    ctx.fillText(today, finalCanvas.width / 2, finalCanvas.height - 10);
+  }
+
+  finalStrip.innerHTML = ""; // Clear previous preview
+
+  // --- Label for 4 photos preview ---
+  const label1 = document.createElement('div');
+  label1.textContent = "Your 4 Photos:";
+  label1.className = "label";
+  finalStrip.appendChild(label1);
+
+  // Show all 4 photos vertically as a preview
+  for (let i = 0; i < 4; i++) {
+    if (stripImages[i]) {
+      const img = document.createElement("img");
+      img.src = stripImages[i].src;
+      img.style.width = "230px";
+      img.style.height = "170px";
+      img.style.borderRadius = "10px";
+      img.style.marginBottom = "12px";
+      img.style.objectFit = "cover";
+      finalStrip.appendChild(img);
+    }
+  }
+
+  // --- Divider ---
+  const hr = document.createElement('hr');
+  hr.style.margin = "20px 0";
+  finalStrip.appendChild(hr);
+
+  // --- Label for finished strip preview ---
+  const label2 = document.createElement('div');
+  label2.textContent = "Your Finished Strip:";
+  label2.className = "label";
+  finalStrip.appendChild(label2);
+
+  // Add the full strip as a single image for download
+  const preview = new Image();
+  preview.src = finalCanvas.toDataURL();
+ preview.style.width = "230px";
+preview.style.height = "auto";
+preview.style.display = "block";
+preview.style.margin = "0 auto 12px auto";
+preview.style.objectFit = "contain";
+  finalStrip.appendChild(preview);
+
+  // Add download link
+  const link = document.createElement('a');
+  link.textContent = "Download Strip";
+  link.style.display = "inline-block";
+  link.style.marginTop = "15px";
+  link.style.textDecoration = "none";
+  link.style.background = "#363636";
+  link.style.color = "white";
+  link.style.padding = "10px 20px";
+  link.style.borderRadius = "8px";
+  link.href = preview.src;
+  link.download = "photobooth-strip.png";
+  finalStrip.appendChild(link);
+}
+
+  // ▶️ Start sequence
+  startBtn.addEventListener("click", () => {
+    stripImages.length = 0;
+    finalStrip.innerHTML = "";
+    let i = 0;
+    function nextShot() {
+      if (i < 4) {
+        showCountdown(3, () => {
+          takePhoto(i, () => {
+            i++;
+            nextShot();
+          });
+        });
+      } else {
+        page1.classList.add("hidden");
+page2.classList.remove("hidden");
+setTimeout(() => {
+  renderFinalStrip();
+}, 100);
+
+      }
+    }
+    nextShot();
+  });
+
+  // 🎨 Live frame/text/date color updates
+  frameColorSelect.addEventListener("change", renderFinalStrip);
+  textColorSelect.addEventListener("change", renderFinalStrip);
+  showDateCheckbox.addEventListener("change", renderFinalStrip);
+});
+</script>
+
+</body>
+</html>
